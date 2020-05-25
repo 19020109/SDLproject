@@ -1,266 +1,386 @@
 #include <iostream>
+#include <string>
 #include <SDL2/SDL.h>
-#include <SDL2_image/SDL_image.h>
-#include <stdio.h>
-#include <vector>
-#include "SDL_Prior.h"
+#include <SDL2_ttf/SDL_ttf.h>
+#include <SDL2_mixer/SDL_mixer.h>
+#include <chrono>
+#include "gameScr.hpp"
 
 using namespace std;
-const string WINDOW_TITLE = "Snake";
-const int SCREEN_WIDTH = 25*30+1;
-const int SCREEN_HEIGHT = 25*25+1;
 
-bool checkCollision(int foodX, int foodY, int playerX, int playerY) {
-    if (playerX == foodX && playerY == foodY){
-        return true;
+const string WINDOW_TITLE = "Pooong";
+const int SCREEN_WIDTH = 1280;
+const int SCREEN_HEIGHT = 720;
+const float PADDLE_SPEED = 1.0f;
+const int PADDLE_WIDTH = 10;
+const int PADDLE_HEIGHT = 100;
+const float BALL_SPEED = 1.0f;
+const int BALL_WIDTH = 15;
+const int BALL_HEIGHT = 15;
+
+
+enum Buttons{
+    PaddleOneUp = 0,
+    PaddleOneDown,
+    PaddleTwoUp,
+    PaddleTwoDown,
+};
+
+
+enum class CollisionType{
+    None,
+    Top,
+    Middle,
+    Bottom,
+    Left,
+    Right
+};
+
+
+struct Contact{
+    CollisionType type;
+    float penetration;
+};
+
+
+class Vec2{
+public:
+    Vec2()
+        : x(0.0f), y(0.0f)
+    {}
+
+    Vec2(float x, float y)
+        : x(x), y(y)
+    {}
+
+    Vec2 operator+(Vec2 const& rhs){
+        return Vec2(x + rhs.x, y + rhs.y);
     }
-    return false;
-}
 
-pair<int, int> getFoodSpawn(vector<int> tailX, vector<int> tailY, int playerX, int playerY, int scale, int wScale, int tailLength) {
-    bool valid = true;
-    int x = 0, y = 0;
-    srand(time(0));
-    x = scale * (rand() % wScale);
-    y = scale * (rand() % scale);
+    Vec2& operator+=(Vec2 const& rhs){
+        x += rhs.x;
+        y += rhs.y;
 
-    for (int i = 0; i < tailLength; i++) {
-        if ((x == tailX[i] && y == tailY[i]) || (x == playerX && y == playerY)) {
-            valid = false;
+        return *this;
+    }
+
+    Vec2 operator*(float rhs){
+        return Vec2(x * rhs, y * rhs);
+    }
+
+    float x, y;
+};
+
+class Paddle{
+public:
+    Paddle(Vec2 position, Vec2 velocity)
+        : position(position), velocity(velocity){
+        rect.x = static_cast<int>(position.x);
+        rect.y = static_cast<int>(position.y);
+        rect.w = PADDLE_WIDTH;
+        rect.h = PADDLE_HEIGHT;
+    }
+
+    void Update(float dt){
+        position += velocity * dt;
+
+        if (position.y < 0){
+            position.y = 0;
+        }
+        else if (position.y > (SCREEN_HEIGHT - PADDLE_HEIGHT)){
+            position.y = SCREEN_HEIGHT - PADDLE_HEIGHT;
         }
     }
-    if (!valid) {
-        pair<int, int> foodLoc;
-        foodLoc = make_pair(-100, -100);
-        return foodLoc;
+
+    void Draw(SDL_Renderer* renderer){
+        rect.y = static_cast<int>(position.y);
+
+        SDL_RenderFillRect(renderer, &rect);
     }
-    pair<int, int> foodLoc;
-    foodLoc = make_pair(x, y);
-    return foodLoc;
+
+    Vec2 position;
+    Vec2 velocity;
+    SDL_Rect rect{};
+};
+
+
+class Ball{
+public:
+    Ball(Vec2 position, Vec2 velocity)
+        : position(position), velocity(velocity){
+        rect.x = static_cast<int>(position.x);
+        rect.y = static_cast<int>(position.y);
+        rect.w = BALL_WIDTH;
+        rect.h = BALL_HEIGHT;
+    }
+
+    void Update(float dt){
+        position += velocity * dt;
+    }
+
+    void Draw(SDL_Renderer* renderer){
+        rect.x = static_cast<int>(position.x);
+        rect.y = static_cast<int>(position.y);
+
+        SDL_RenderFillRect(renderer, &rect);
+    }
+
+    void CollideWithPaddle(Contact const& contact){
+        position.x += contact.penetration;
+        velocity.x = -velocity.x;
+
+        if (contact.type == CollisionType::Top){
+            velocity.y = -.75f * BALL_SPEED;
+        }
+        else if (contact.type == CollisionType::Bottom){
+            velocity.y = 0.75f * BALL_SPEED;
+        }
+    }
+
+    void CollideWithWall(Contact const& contact){
+        if ((contact.type == CollisionType::Top)
+            || (contact.type == CollisionType::Bottom)){
+            position.y += contact.penetration;
+            velocity.y = -velocity.y;
+        }
+        else if (contact.type == CollisionType::Left){
+            position.x = SCREEN_WIDTH / 2.0f;
+            position.y = SCREEN_HEIGHT / 2.0f;
+            velocity.x = BALL_SPEED;
+            velocity.y = 0.75f * BALL_SPEED;
+        }
+        else if (contact.type == CollisionType::Right){
+            position.x = SCREEN_WIDTH / 2.0f;
+            position.y = SCREEN_HEIGHT / 2.0f;
+            velocity.x = -BALL_SPEED;
+            velocity.y = 0.75f * BALL_SPEED;
+        }
+    }
+
+    Vec2 position;
+    Vec2 velocity;
+    SDL_Rect rect{};
+};
+
+
+
+Contact CheckPaddleCollision(Ball const& ball, Paddle const& paddle){
+    float ballLeft = ball.position.x;
+    float ballRight = ball.position.x + BALL_WIDTH;
+    float ballTop = ball.position.y;
+    float ballBottom = ball.position.y + BALL_HEIGHT;
+
+    float paddleLeft = paddle.position.x;
+    float paddleRight = paddle.position.x + PADDLE_WIDTH;
+    float paddleTop = paddle.position.y;
+    float paddleBottom = paddle.position.y + PADDLE_HEIGHT;
+
+    Contact contact{};
+
+    if (ballLeft >= paddleRight){
+        return contact;
+    }
+
+    if (ballRight <= paddleLeft){
+        return contact;
+    }
+
+    if (ballTop >= paddleBottom){
+        return contact;
+    }
+
+    if (ballBottom <= paddleTop){
+        return contact;
+    }
+
+    float paddleRangeUpper = paddleBottom - (2.0f * PADDLE_HEIGHT / 3.0f);
+    float paddleRangeMiddle = paddleBottom - (PADDLE_HEIGHT / 3.0f);
+
+    if (ball.velocity.x < 0){
+        // Left paddle
+        contact.penetration = paddleRight - ballLeft;
+    }
+    else if (ball.velocity.x > 0){
+        // Right paddle
+        contact.penetration = paddleLeft - ballRight;
+    }
+
+    if ((ballBottom > paddleTop)
+        && (ballBottom < paddleRangeUpper)){
+        contact.type = CollisionType::Top;
+    }
+    else if ((ballBottom > paddleRangeUpper)
+             && (ballBottom < paddleRangeMiddle)){
+        contact.type = CollisionType::Middle;
+    }
+    else{
+        contact.type = CollisionType::Bottom;
+    }
+
+    return contact;
 }
 
-int main(int argc, char* argv[]) {
+
+Contact CheckWallCollision(Ball const& ball)
+{
+    float ballLeft = ball.position.x;
+    float ballRight = ball.position.x + BALL_WIDTH;
+    float ballTop = ball.position.y;
+    float ballBottom = ball.position.y + BALL_HEIGHT;
+
+    Contact contact{};
+
+    if (ballLeft < 0.0f){
+        contact.type = CollisionType::Left;
+    }
+    else if (ballRight > SCREEN_WIDTH){
+        contact.type = CollisionType::Right;
+    }
+    else if (ballTop < 0.0f){
+        contact.type = CollisionType::Top;
+        contact.penetration = -ballTop;
+    }
+    else if (ballBottom > SCREEN_HEIGHT){
+        contact.type = CollisionType::Bottom;
+        contact.penetration = SCREEN_HEIGHT - ballBottom;
+    }
+
+    return contact;
+}
+
+
+int main(){
     SDL_Window* window;
     SDL_Renderer* renderer;
-    SDL_Event event;
-
-    SDL_Rect player;
-    player.x = 0;
-    player.y = 0;
-    player.h = 0;
-    player.w = 0;
-
-    int tailLength = 0;
-
-    vector<int> tailX;
-    vector<int> tailY;
-
-    int scale = 25, wScale = 30;
-
-    int x = 0, y = 0;
-    int prevX = 0, prevY = 0;
-
-    bool up = false;
-    bool down = false;
-    bool right = false;
-    bool left = false;
-
-    bool inputThisFrame = false;
-    bool redo = false;
-
-    SDL_Rect food;
-    food.w = scale;
-    food.h = scale;
-    food.x = 0;
-    food.y = 0;
-    
-    pair<int, int> foodLoc = getFoodSpawn(tailX, tailY, x, y, scale, wScale, tailLength);
-    food.x = foodLoc.first;
-    food.y = foodLoc.second;
-
     initSDL(window, renderer, SCREEN_WIDTH, SCREEN_HEIGHT, WINDOW_TITLE);
 
-    float time = SDL_GetTicks() / 100;
+    {
+        Ball ball(
+            Vec2(SCREEN_WIDTH / 2.0f, SCREEN_HEIGHT / 2.0f),
+            Vec2(BALL_SPEED, 0.0f));
 
-    while (true) {
+        Paddle paddleOne(
+            Vec2(50.0f, SCREEN_HEIGHT / 2.0f),
+            Vec2(0.0f, 0.0f));
 
-        float newTime = SDL_GetTicks() / 75;
-        float delta = newTime - time;
-        time = newTime;
+        Paddle paddleTwo(
+            Vec2(SCREEN_WIDTH - 50.0f, SCREEN_HEIGHT / 2.0f),
+            Vec2(0.0f, 0.0f));
 
-        inputThisFrame = false;
+        bool running = true;
+        bool buttons[4] = {};
 
-        if (tailLength >= 25*30) {
-            x = 0;
-            y = 0;
-            up = false;
-            left = false;
-            right = false;
-            down = false;
-            tailX.clear();
-            tailY.clear();
-            tailLength = 0;
-            redo = false;
-            foodLoc = getFoodSpawn(tailX, tailY, x, y, scale, wScale, tailLength);
+        float dt = 0.0f;
 
-            if (food.x == -100 && food.y == -100) {
-                redo = true;
-            }
+        while (running){
+            
+            auto startTime = std::chrono::high_resolution_clock::now();
 
-            food.x = foodLoc.first;
-            food.y = foodLoc.second;
-        }
-
-        if (SDL_PollEvent(&event)) {
-
-            if (event.type == SDL_QUIT) {
-                exit(0);
-            }
-            if (event.type == SDL_KEYDOWN && inputThisFrame == false) {
-                if (down == false && event.key.keysym.scancode == SDL_SCANCODE_UP) {
-                    up = true;
-                    left = false;
-                    right = false;
-                    down = false;
-                    inputThisFrame = true;
+            SDL_Event event;
+            while (SDL_PollEvent(&event)){
+                if (event.type == SDL_QUIT){
+                    running = false;
                 }
-                else if (right == false && event.key.keysym.scancode == SDL_SCANCODE_LEFT) {
-                    up = false;
-                    left = true;
-                    right = false;
-                    down = false;
-                    inputThisFrame = true;
+                else if (event.type == SDL_KEYDOWN){
+
+                    if (event.key.keysym.sym == SDLK_ESCAPE){
+                        running = false;
+                    }
+                    else if (event.key.keysym.sym == SDLK_w){
+                        buttons[Buttons::PaddleOneUp] = true;
+                    }
+                    else if (event.key.keysym.sym == SDLK_s){
+                        buttons[Buttons::PaddleOneDown] = true;
+                    }
+                    else if (event.key.keysym.sym == SDLK_UP){
+                        buttons[Buttons::PaddleTwoUp] = true;
+                    }
+                    else if (event.key.keysym.sym == SDLK_DOWN){
+                        buttons[Buttons::PaddleTwoDown] = true;
+                    }
                 }
-                else if (up == false && event.key.keysym.scancode == SDL_SCANCODE_DOWN) {
-                    up = false;
-                    left = false;
-                    right = false;
-                    down = true;
-                    inputThisFrame = true;
+                else if (event.type == SDL_KEYUP){
+                    
+                    if (event.key.keysym.sym == SDLK_w){
+                        buttons[Buttons::PaddleOneUp] = false;
+                    }
+                    else if (event.key.keysym.sym == SDLK_s){
+                        buttons[Buttons::PaddleOneDown] = false;
+                    }
+                    else if (event.key.keysym.sym == SDLK_UP){
+                        buttons[Buttons::PaddleTwoUp] = false;
+                    }
+                    else if (event.key.keysym.sym == SDLK_DOWN){
+                        buttons[Buttons::PaddleTwoDown] = false;
+                    }
                 }
-                else if (left == false && event.key.keysym.scancode == SDL_SCANCODE_RIGHT) {
-                    up = false;
-                    left = false;
-                    right = true;
-                    down = false;
-                    inputThisFrame = true;
+            }
+
+
+            if (buttons[Buttons::PaddleOneUp]){
+                paddleOne.velocity.y = -PADDLE_SPEED;
+            }
+            else if (buttons[Buttons::PaddleOneDown]){
+                paddleOne.velocity.y = PADDLE_SPEED;
+            }
+            else{
+                paddleOne.velocity.y = 0.0f;
+            }
+
+            if (buttons[Buttons::PaddleTwoUp]){
+                paddleTwo.velocity.y = -PADDLE_SPEED;
+            }
+            else if (buttons[Buttons::PaddleTwoDown]){
+                paddleTwo.velocity.y = PADDLE_SPEED;
+            }
+            else{
+                paddleTwo.velocity.y = 0.0f;
+            }
+
+            paddleOne.Update(dt);
+            paddleTwo.Update(dt);
+
+            ball.Update(dt);
+
+            if (Contact contact = CheckPaddleCollision(ball, paddleOne);
+                contact.type != CollisionType::None){
+                ball.CollideWithPaddle(contact);
+            }
+            else if (contact = CheckPaddleCollision(ball, paddleTwo);
+                contact.type != CollisionType::None){
+                ball.CollideWithPaddle(contact);
+            }
+            else if (contact = CheckWallCollision(ball);
+                contact.type != CollisionType::None){
+                ball.CollideWithWall(contact);
+            }
+
+            SDL_SetRenderDrawColor(renderer, 0x0, 0x0, 0x0, 0xFF);
+            SDL_RenderClear(renderer);
+
+            SDL_SetRenderDrawColor(renderer, 0xFF, 0xFF, 0xFF, 0xFF);
+
+            for (int y = 0; y < SCREEN_HEIGHT; ++y)
+            {
+                if (y % 5)
+                {
+                    SDL_RenderDrawPoint(renderer, SCREEN_WIDTH / 2, y);
                 }
-
             }
 
+            ball.Draw(renderer);
+            paddleOne.Draw(renderer);
+            paddleTwo.Draw(renderer);
+
+            SDL_RenderPresent(renderer);
+
+            auto stopTime = std::chrono::high_resolution_clock::now();
+            dt = std::chrono::duration<float, std::chrono::milliseconds::period>(stopTime - startTime).count();
         }
-
-        prevX = x;
-        prevY = y;
-
-        if (up) {
-            y -= delta * scale;
-        }
-        else if (left) {
-            x -= delta * scale;
-        }
-        else if (right) {
-            x += delta * scale;
-        }
-        else if (down) {
-            y += delta * scale;
-        }
-
-        if (redo == true) {
-            redo = false;
-            foodLoc = getFoodSpawn(tailX, tailY, x, y, scale, wScale, tailLength);
-            food.x = foodLoc.first;
-            food.y = foodLoc.second;
-
-            if (food.x == -100 && food.y == -100) {
-                redo = true;
-            }
-
-        }
-
-        if (checkCollision(food.x, food.y, x, y)) {
-            foodLoc = getFoodSpawn(tailX, tailY, x, y, scale, wScale, tailLength);
-            food.x = foodLoc.first;
-            food.y = foodLoc.second;
-
-            if (food.x == -100 && food.y == -100) {
-                redo = true;
-            }
-            tailLength++;
-        }
-
-        if (delta * scale == 25) {
-            if (tailX.size() != tailLength) {
-                tailX.push_back(prevX);
-                tailY.push_back(prevY);
-            }
-            for (int i = 0; i < tailLength; i++) {
-                if (i == 0) continue;
-                    tailX[i - 1] = tailX[i];
-                    tailY[i - 1] = tailY[i];
-            }
-            if (tailLength > 0) {
-                tailX[tailLength - 1] = prevX;
-                tailY[tailLength - 1] = prevY;
-            }
-        }
-        
-        for (int i = 0; i < tailLength; i++) {
-            if (x == tailX[i] && y == tailY[i]) {
-                x = 0;
-                y = 0;
-                up = false;
-                left = false;
-                right = false;
-                down = false;
-                tailX.clear();
-                tailY.clear();
-                tailLength = 0;
-                redo = false;
-
-                foodLoc = getFoodSpawn(tailX, tailY, x, y, scale, wScale, tailLength);
-                if (food.x == -100 && food.y == -100) {
-                    redo = true;
-                }
-
-                food.x = foodLoc.first;
-                food.y = foodLoc.second;
-            }
-
-        }
-
-        if (x < 0 || y < 0 || x > scale * wScale - scale || y > scale * scale - scale) {
-            x = 0;
-            y = 0;
-            up = false;
-            left = false;
-            right = false;
-            down = false;
-            tailX.clear();
-            tailY.clear();
-            tailLength = 0;
-            redo = false;
-            foodLoc = getFoodSpawn(tailX, tailY, x, y, scale, wScale, tailLength);
-            food.x = foodLoc.first;
-            food.y = foodLoc.second;
-
-            if (food.x == -100 && food.y == -100) {
-                redo = true;
-            }
-
-        }
-        renderFood(renderer, food);
-        renderPlayer(renderer, player, x, y, scale, tailX, tailY, tailLength);
-        
-        SDL_RenderDrawLine(renderer, 0, 0, 0, 25*25);
-        SDL_RenderDrawLine(renderer, 0, 0, 25*30, 0);
-        SDL_RenderDrawLine(renderer, 25*30, 0, 25*30, 25*25);
-        SDL_RenderDrawLine(renderer, 0, 25*25, 25*30, 25*25);
-        
-        SDL_RenderPresent(renderer);
-        SDL_SetRenderDrawColor(renderer, 105, 105, 105, 255);
-        SDL_RenderClear(renderer);
     }
-    quitSDL(window, renderer);
+
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
+    SDL_Quit();
     return 0;
 }
