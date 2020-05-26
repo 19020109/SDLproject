@@ -1,9 +1,8 @@
 #include <iostream>
 #include <string>
+#include <chrono>
 #include <SDL2/SDL.h>
 #include <SDL2_ttf/SDL_ttf.h>
-#include <SDL2_mixer/SDL_mixer.h>
-#include <chrono>
 #include "gameScr.hpp"
 
 using namespace std;
@@ -18,14 +17,12 @@ const float BALL_SPEED = 1.0f;
 const int BALL_WIDTH = 15;
 const int BALL_HEIGHT = 15;
 
-
 enum Buttons{
-    PaddleOneUp = 0,
+    PaddleOneUp,
     PaddleOneDown,
     PaddleTwoUp,
     PaddleTwoDown,
 };
-
 
 enum class CollisionType{
     None,
@@ -36,12 +33,10 @@ enum class CollisionType{
     Right
 };
 
-
 struct Contact{
     CollisionType type;
     float penetration;
 };
-
 
 class Vec2{
 public:
@@ -60,7 +55,6 @@ public:
     Vec2& operator+=(Vec2 const& rhs){
         x += rhs.x;
         y += rhs.y;
-
         return *this;
     }
 
@@ -144,14 +138,14 @@ public:
             velocity.y = -velocity.y;
         }
         else if (contact.type == CollisionType::Left){
-            position.x = SCREEN_WIDTH / 2.0f;
-            position.y = SCREEN_HEIGHT / 2.0f;
+            position.x = SCREEN_WIDTH / 2;
+            position.y = SCREEN_HEIGHT / 2;
             velocity.x = BALL_SPEED;
             velocity.y = 0.75f * BALL_SPEED;
         }
         else if (contact.type == CollisionType::Right){
-            position.x = SCREEN_WIDTH / 2.0f;
-            position.y = SCREEN_HEIGHT / 2.0f;
+            position.x = SCREEN_WIDTH / 2;
+            position.y = SCREEN_HEIGHT / 2;
             velocity.x = -BALL_SPEED;
             velocity.y = 0.75f * BALL_SPEED;
         }
@@ -193,15 +187,13 @@ Contact CheckPaddleCollision(Ball const& ball, Paddle const& paddle){
         return contact;
     }
 
-    float paddleRangeUpper = paddleBottom - (2.0f * PADDLE_HEIGHT / 3.0f);
-    float paddleRangeMiddle = paddleBottom - (PADDLE_HEIGHT / 3.0f);
+    float paddleRangeUpper = paddleBottom - (2 * PADDLE_HEIGHT / 3);
+    float paddleRangeMiddle = paddleBottom - (PADDLE_HEIGHT / 3);
 
     if (ball.velocity.x < 0){
-        // Left paddle
         contact.penetration = paddleRight - ballLeft;
     }
     else if (ball.velocity.x > 0){
-        // Right paddle
         contact.penetration = paddleLeft - ballRight;
     }
 
@@ -230,13 +222,13 @@ Contact CheckWallCollision(Ball const& ball)
 
     Contact contact{};
 
-    if (ballLeft < 0.0f){
+    if (ballLeft < 0){
         contact.type = CollisionType::Left;
     }
     else if (ballRight > SCREEN_WIDTH){
         contact.type = CollisionType::Right;
     }
-    else if (ballTop < 0.0f){
+    else if (ballTop < 0){
         contact.type = CollisionType::Top;
         contact.penetration = -ballTop;
     }
@@ -256,21 +248,21 @@ int main(){
 
     {
         Ball ball(
-            Vec2(SCREEN_WIDTH / 2.0f, SCREEN_HEIGHT / 2.0f),
+            Vec2(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2),
             Vec2(BALL_SPEED, 0.0f));
 
         Paddle paddleOne(
-            Vec2(50.0f, SCREEN_HEIGHT / 2.0f),
+            Vec2(50.0f, SCREEN_HEIGHT / 2),
             Vec2(0.0f, 0.0f));
 
         Paddle paddleTwo(
-            Vec2(SCREEN_WIDTH - 50.0f, SCREEN_HEIGHT / 2.0f),
+            Vec2(SCREEN_WIDTH - 50.0f, SCREEN_HEIGHT / 2),
             Vec2(0.0f, 0.0f));
 
         bool running = true;
         bool buttons[4] = {};
 
-        float dt = 0.0f;
+        float dt = 0;
 
         while (running){
             
@@ -316,7 +308,6 @@ int main(){
                 }
             }
 
-
             if (buttons[Buttons::PaddleOneUp]){
                 paddleOne.velocity.y = -PADDLE_SPEED;
             }
@@ -324,7 +315,7 @@ int main(){
                 paddleOne.velocity.y = PADDLE_SPEED;
             }
             else{
-                paddleOne.velocity.y = 0.0f;
+                paddleOne.velocity.y = 0;
             }
 
             if (buttons[Buttons::PaddleTwoUp]){
@@ -334,7 +325,7 @@ int main(){
                 paddleTwo.velocity.y = PADDLE_SPEED;
             }
             else{
-                paddleTwo.velocity.y = 0.0f;
+                paddleTwo.velocity.y = 0;
             }
 
             paddleOne.Update(dt);
@@ -360,10 +351,8 @@ int main(){
 
             SDL_SetRenderDrawColor(renderer, 0xFF, 0xFF, 0xFF, 0xFF);
 
-            for (int y = 0; y < SCREEN_HEIGHT; ++y)
-            {
-                if (y % 5)
-                {
+            for (int y = 0; y < SCREEN_HEIGHT; ++y){
+                if (y % 5){
                     SDL_RenderDrawPoint(renderer, SCREEN_WIDTH / 2, y);
                 }
             }
@@ -378,9 +367,7 @@ int main(){
             dt = std::chrono::duration<float, std::chrono::milliseconds::period>(stopTime - startTime).count();
         }
     }
-
-    SDL_DestroyRenderer(renderer);
-    SDL_DestroyWindow(window);
-    SDL_Quit();
+    
+    quitSDL(window, renderer);
     return 0;
 }
